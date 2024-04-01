@@ -210,3 +210,77 @@ CAdisor 에서는 생성된 모든 컨테이너의 자원 사용량을 확인 �
 -H 옵션을 원격의 도커 데몬을 제어하기 위해사용하는 것도 좋은 방법이 될 수 있지만
 
 컨테이너 애플리케이션이 수행해야 할 작업이 많거나 애플리케이션 초기화 등에 복잡한 과정이 포함돼 있다면 도커를 제어하는 라이브러리를 사용할 수도 있다.
+
+
+-----------------------------
+
+## 추가내용 정리
+
+NEXT.JS 프로젝트를 컨테이너화 시켜 EC2 에서 배포를 시키는 형식은 좋은 방법처럼 보인다.
+
+다만 문제점이라면 하나의 EC2 서버에서 관리를 한다는 점이 많이 불안하다는 점이다.
+
+스웜과 같이 활용하여 서버를 배포할 수는 있겠지만 트래픽이 큰 서버에서 안정성이 부족할 것이라는 것이 벌써부터 보인다.
+
+우선 작은 서버를 배포하기 위해서 어떻게 해야할까 생각을 해보았다.
+
+1. 우선 1주차와 같이 프로젝트를 컨테이너화 한다.
+
+### 컨테이너 경량화
+
+node_module 과 같은 모듈들은 도커의 이미지로 바로 담기에는 너무나 무겁다.
+
+하지만 도커의 특성상 이미지가 변경되면 다시 다운을 받는데
+만약 노드 모듈이 캐싱이 되어 빌드떄 사용하는 용량이 줄고 비용도 절감된다면 좋을 것이라 생각했다.
+
+다행히 도커에는 레이어를 여러개 만들어 레이어의 변경점이 없다면 캐싱데이터를 그대로 사용할 수 있다.
+
+도커 컨테이너의 파일을 조금 바꿔보았다.
+
+```
+FROM node:alpine as builder
+
+WORKDIR /app
+
+COPY package.json yarn.lock ./
+
+RUN yarn install --frozen-lockfile
+
+COPY . .
+
+RUN yarn build
+
+// 레이어 추가
+
+RUN yarn build
+
+FROM node:alpine
+
+WORKDIR /app
+
+// 첫 번쨰 레이어에서 노드 파일 훔쳐오기
+
+COPY --from=builder /app/.next .next
+COPY --from=builder /app/node_module node_module
+COPY --from=builder /app/public public
+COPY --from=builder /app/package.json package.json
+
+## 환경 변수
+ENV NODE_ENV production
+
+# 실행
+
+CMD ["yarn", "start"]
+```
+
+### 2. AWS ECR
+
+이렇게 도커의 컨테이너 자체를 경량화 시켰고 빌드 시간도 첫 빌드 이후에는 단축되었다.
+
+두 번쨰로 알아본 자료는 AWS ECR 이다.
+
+AWS 에서 컨테이너 이미지를 관리하게 해주는 레지스트리 서비스라고 한다. docker hub 처럼 private 서비스를 사용할 수 있다.
+
+이제 github Action 으로 도커 컨테이너를 이미지화 시켜 ECR 에 업로드 -> EC2 에서 docker compose build -> docker compose up -d(백그라운드 실행)
+
+이 계획을 실행해보려 한다.. 다음주에
